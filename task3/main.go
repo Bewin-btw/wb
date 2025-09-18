@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -27,6 +30,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	ch := make(chan int)
 	var wg sync.WaitGroup
 
@@ -35,10 +41,26 @@ func main() {
 		go worker(i, ch, &wg)
 	}
 
-	counter := 1
-	for {
-		ch <- counter
-		counter++
-		time.Sleep(500 * time.Millisecond)
-	}
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		counter := 1
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				ch <- counter
+				counter++
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+	}()
+
+	<-sigChan
+	fmt.Println("\nShutting down")
+	cancel()
+	close(ch)
+	wg.Wait()
 }
